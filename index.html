@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detector de Objetos COCO-SSD</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.17.0/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2"></script>
+    <link rel="stylesheet" type="text/css" href="style.css"/>
+</head>
+<body>
+    <div class="container">
+        <h1>Detector de Objetos COCO-SSD</h1>
+        
+        <div class="upload-section">
+            <div class="file-input-wrapper">
+                <input type="file" id="imageInput" class="file-input" accept="image/*">
+                <label for="imageInput" class="file-input-button">
+                    Selecionar Imagem
+                </label>
+            </div>
+            <div id="status" class="status hidden"></div>
+        </div>
+
+        <div class="image-container">
+            <div class="canvas-container">
+                <img id="imageDisplay" class="hidden" alt="Imagem selecionada">
+                <canvas id="detectionCanvas" class="hidden"></canvas>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-section hidden">
+            <div class="results-title">Objetos Detectados</div>
+            <div id="detectionResults"></div>
+        </div>
+    </div>
+
+    <script>
+        let model;
+        const imageInput = document.getElementById('imageInput');
+        const imageDisplay = document.getElementById('imageDisplay');
+        const detectionCanvas = document.getElementById('detectionCanvas');
+        const status = document.getElementById('status');
+        const resultsSection = document.getElementById('resultsSection');
+        const detectionResults = document.getElementById('detectionResults');
+
+        // Função para mostrar status
+        function showStatus(message, type = 'loading') {
+            status.className = `status ${type}`;
+            status.innerHTML = type === 'loading' 
+                ? `<span class="loading-spinner"></span>${message}` 
+                : message;
+            status.classList.remove('hidden');
+        }
+
+        function hideStatus() {
+            status.classList.add('hidden');
+        }
+
+        // Carregar modelo COCO-SSD
+        async function loadModel() {
+            try {
+                showStatus('Carregando modelo COCO-SSD...', 'loading');
+                
+                // Aguardar que o TensorFlow e COCO-SSD estejam disponíveis
+                let attempts = 0;
+                const maxAttempts = 20;
+                
+                while (attempts < maxAttempts) {
+                    if (typeof tf !== 'undefined' && typeof cocoSsd !== 'undefined') {
+                        break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
+                }
+                
+                if (typeof tf === 'undefined') {
+                    throw new Error('TensorFlow.js não foi carregado');
+                }
+                
+                if (typeof cocoSsd === 'undefined') {
+                    throw new Error('COCO-SSD não foi carregado');
+                }
+                
+                console.log('TensorFlow versão:', tf.version.tfjs);
+                console.log('COCO-SSD disponível:', typeof cocoSsd);
+                
+                // Carregar o modelo
+                model = await cocoSsd.load();
+                console.log('Modelo COCO-SSD carregado com sucesso');
+                
+                showStatus('Modelo carregado com sucesso! 🎉', 'success');
+                setTimeout(hideStatus, 2000);
+                
+            } catch (error) {
+                console.error('Erro detalhado ao carregar modelo:', error);
+                showStatus(`Erro: ${error.message}. Tente recarregar a página.`, 'error');
+            }
+        }
+
+        // Processar imagem selecionada
+        imageInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!model) {
+                showStatus('Aguarde o modelo terminar de carregar...', 'error');
+                return;
+            }
+
+            try {
+                showStatus('Processando imagem...', 'loading');
+
+                // Mostrar imagem
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    imageDisplay.src = e.target.result;
+                    imageDisplay.classList.remove('hidden');
+                    
+                    imageDisplay.onload = async () => {
+                        try {
+                            // Detectar objetos
+                            const predictions = await model.detect(imageDisplay);
+                            
+                            // Configurar canvas
+                            setupCanvas();
+                            
+                            // Desenhar detecções
+                            drawDetections(predictions);
+                            
+                            // Mostrar resultados
+                            displayResults(predictions);
+                            
+                            showStatus(`${predictions.length} objeto(s) detectado(s)! 🎯`, 'success');
+                            setTimeout(hideStatus, 3000);
+                            
+                        } catch (error) {
+                            console.error('Erro na detecção:', error);
+                            showStatus('Erro ao processar imagem.', 'error');
+                        }
+                    };
+                };
+                reader.readAsDataURL(file);
+                
+            } catch (error) {
+                console.error('Erro ao processar arquivo:', error);
+                showStatus('Erro ao processar arquivo.', 'error');
+            }
+        });
+
+        // Configurar canvas
+        function setupCanvas() {
+            const rect = imageDisplay.getBoundingClientRect();
+            const scaleX = imageDisplay.naturalWidth / imageDisplay.width;
+            const scaleY = imageDisplay.naturalHeight / imageDisplay.height;
+            
+            detectionCanvas.width = imageDisplay.width;
+            detectionCanvas.height = imageDisplay.height;
+            detectionCanvas.style.width = imageDisplay.width + 'px';
+            detectionCanvas.style.height = imageDisplay.height + 'px';
+            detectionCanvas.classList.remove('hidden');
+        }
+
+        // Desenhar detecções no canvas
+        function drawDetections(predictions) {
+            const ctx = detectionCanvas.getContext('2d');
+            ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+            
+            const scaleX = imageDisplay.width / imageDisplay.naturalWidth;
+            const scaleY = imageDisplay.height / imageDisplay.naturalHeight;
+            
+            predictions.forEach((prediction, index) => {
+                const [x, y, width, height] = prediction.bbox;
+                const scaledX = x * scaleX;
+                const scaledY = y * scaleY;
+                const scaledWidth = width * scaleX;
+                const scaledHeight = height * scaleY;
+                
+                // Cores diferentes para cada detecção
+                const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
+                const color = colors[index % colors.length];
+                
+                // Desenhar caixa
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+                
+                // Desenhar fundo do texto
+                ctx.fillStyle = color;
+                const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(scaledX, scaledY - 25, textWidth + 10, 25);
+                
+                // Desenhar texto
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 14px Arial';
+                ctx.fillText(text, scaledX + 5, scaledY - 8);
+            });
+        }
+
+        // Mostrar resultados
+        function displayResults(predictions) {
+            if (predictions.length === 0) {
+                detectionResults.innerHTML = '<div class="detection-item">Nenhum objeto detectado</div>';
+            } else {
+                detectionResults.innerHTML = predictions
+                    .sort((a, b) => b.score - a.score)
+                    .map(prediction => `
+                        <div class="detection-item">
+                            <span class="detection-label">${prediction.class}</span>
+                            <span class="detection-confidence">${Math.round(prediction.score * 100)}%</span>
+                        </div>
+                    `).join('');
+            }
+            
+            resultsSection.classList.remove('hidden');
+        }
+
+        // Inicializar aplicação quando os scripts estiverem prontos
+        document.addEventListener('DOMContentLoaded', () => {
+            // Aguardar um pouco mais para garantir que todos os scripts carregaram
+            setTimeout(loadModel, 1000);
+        });
+    </script>
+</body>
+</html>
